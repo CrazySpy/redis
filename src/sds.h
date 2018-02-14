@@ -41,6 +41,7 @@
 
 typedef char *sds;
 
+//flags成员的低三位是有效的，高五位是空着的，没有被使用
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
  * However is here to document the layout of type 5 SDS strings. */
 struct __attribute__ ((__packed__)) sdshdr5 {
@@ -80,10 +81,16 @@ struct __attribute__ ((__packed__)) sdshdr64 {
 #define SDS_TYPE_MASK 7
 #define SDS_TYPE_BITS 3
 #define SDS_HDR_VAR(T,s) struct sdshdr##T *sh = (void*)((s)-(sizeof(struct sdshdr##T)));
+//相当于求出某种sds结构体的首地址
 #define SDS_HDR(T,s) ((struct sdshdr##T *)((s)-(sizeof(struct sdshdr##T))))
+//type5的flags高五位用来表示数据长度，低三位表示type
 #define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)
 
+
+//把s想象成某一种sds结构体的buf数组首地址，这个在sds.c文件中的sdsnewlen函数中得到印证
 static inline size_t sdslen(const sds s) {
+    //相当于获取这个结构体的flags成员
+    //强调无符号型char是因为有符号型整数右移有如下规则：正数右移高位补0，负数右移高位补1。声明无符号型就直接高位补0
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
         case SDS_TYPE_5:
@@ -100,6 +107,7 @@ static inline size_t sdslen(const sds s) {
     return 0;
 }
 
+//计算sds可用空间
 static inline size_t sdsavail(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -126,6 +134,7 @@ static inline size_t sdsavail(const sds s) {
     return 0;
 }
 
+//设置sds的长度，改变len
 static inline void sdssetlen(sds s, size_t newlen) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
