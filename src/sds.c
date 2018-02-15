@@ -209,6 +209,7 @@ sds sdsMakeRoomFor(sds s, size_t addlen) {
     len = sdslen(s);
     sh = (char*)s-sdsHdrSize(oldtype);
     newlen = (len+addlen);
+    //确保空闲空间小于SDS_MAX_PREALLOC，在减少申请空间次数的同时尽可能减少剩余空间
     if (newlen < SDS_MAX_PREALLOC)
         newlen *= 2;
     else
@@ -841,7 +842,7 @@ sds *sdssplitlen(const char *s, ssize_t len, const char *sep, int seplen, int *c
         if (slots < elements+2) {
             sds *newtokens;
 
-            slots *= 2;
+            slots *= 2; //slots小于elements+2就把slots*2，这样可以减少申请空间次数，不用每次切割完一个字符申请一个空间
             newtokens = s_realloc(tokens,sizeof(sds)*slots);
             if (newtokens == NULL) goto cleanup;
             tokens = newtokens;
