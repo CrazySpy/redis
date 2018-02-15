@@ -33,6 +33,7 @@
 
 /* Node, List, and Iterator are the only data structures used currently. */
 
+//得益于void *的value，node可以存储任意数据类型
 typedef struct listNode {
     struct listNode *prev;
     struct listNode *next;
@@ -47,9 +48,10 @@ typedef struct listIter {
 typedef struct list {
     listNode *head;
     listNode *tail;
-    void *(*dup)(void *ptr);
-    void (*free)(void *ptr);
-    int (*match)(void *ptr, void *key);
+    /*这三个函数指针都是针对listNode的value*/
+    void *(*dup)(void *ptr); //用于复制node中的value
+    void (*free)(void *ptr); //用于释放node中的value
+    int (*match)(void *ptr, void *key); //用于将key与node中的数据进行匹配操作
     unsigned long len;
 } list;
 
@@ -89,6 +91,7 @@ void listRotate(list *list);
 void listJoin(list *l, list *o);
 
 /* Directions for iterators */
+//迭代器的方向
 #define AL_START_HEAD 0
 #define AL_START_TAIL 1
 
