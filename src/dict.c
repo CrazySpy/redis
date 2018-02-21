@@ -137,17 +137,18 @@ int dictResize(dict *d)
     int minimal;
 
     if (!dict_can_resize || dictIsRehashing(d)) return DICT_ERR;
+    /* 哈希桶大小最小是4，所以桶个数小于4的表一律按照4来扩展 */
     minimal = d->ht[0].used;
     if (minimal < DICT_HT_INITIAL_SIZE)
         minimal = DICT_HT_INITIAL_SIZE;
-    return dictExpand(d, minimal);
+    return dictExpand(d, minimal); //扩展到最小的比minimal大的2的次方
 }
 
 /* Expand or create the hash table */
 int dictExpand(dict *d, unsigned long size)
 {
     dictht n; /* the new hash table */
-    unsigned long realsize = _dictNextPower(size);
+    unsigned long realsize = _dictNextPower(size); //表的大小是2的次方，所以表扩展到最小比size大的2的次方，方便掩码计算
 
     /* the size is invalid if it is smaller than the number of
      * elements already inside the hash table */
@@ -155,7 +156,7 @@ int dictExpand(dict *d, unsigned long size)
         return DICT_ERR;
 
     /* Rehashing to the same table size is not useful. */
-    if (realsize == d->ht[0].size) return DICT_ERR;
+    if (realsize == d->ht[0].size) return DICT_ERR; //如果大小不用扩展也返回ERR
 
     /* Allocate the new hash table and initialize all pointers to NULL */
     n.size = realsize;
@@ -185,6 +186,8 @@ int dictExpand(dict *d, unsigned long size)
  * guaranteed that this function will rehash even a single bucket, since it
  * will visit at max N*10 empty buckets in total, otherwise the amount of
  * work it does would be unbound and the function may block for a long time. */
+//为了防止这个函数阻塞进程，最多访问n*10个空哈希桶
+//0号哈希表rehash完一个桶就把桶从0号哈希表去除，这样将rehash分多次进行，提高效率
 int dictRehash(dict *d, int n) {
     int empty_visits = n*10; /* Max number of empty buckets to visit. */
     if (!dictIsRehashing(d)) return 0;
@@ -195,18 +198,20 @@ int dictRehash(dict *d, int n) {
         /* Note that rehashidx can't overflow as we are sure there are more
          * elements because ht[0].used != 0 */
         assert(d->ht[0].size > (unsigned long)d->rehashidx);
+        /* 遇到空桶就计数器加一下然后跳过 */
         while(d->ht[0].table[d->rehashidx] == NULL) {
             d->rehashidx++;
             if (--empty_visits == 0) return 1;
         }
-        de = d->ht[0].table[d->rehashidx];
+        de = d->ht[0].table[d->rehashidx]; //某个有数据的哈希桶的第一个哈希节点
         /* Move all the keys in this bucket from the old to the new hash HT */
         while(de) {
             uint64_t h;
 
             nextde = de->next;
             /* Get the index in the new hash table */
-            h = dictHashKey(d, de->key) & d->ht[1].sizemask;
+            h = dictHashKey(d, de->key) & d->ht[1].sizemask; //框定哈希值到size内
+            /* 当前rehash的节点变成哈希桶的首节点，并且当前节点的下一个节点设为原来的首节点 */
             de->next = d->ht[1].table[h];
             d->ht[1].table[h] = de;
             d->ht[0].used--;
@@ -238,6 +243,7 @@ long long timeInMilliseconds(void) {
 }
 
 /* Rehash for an amount of time between ms milliseconds and ms+1 milliseconds */
+//rehash指定时间，超时或者rehash完所有节点时退出
 int dictRehashMilliseconds(dict *d, int ms) {
     long long start = timeInMilliseconds();
     int rehashes = 0;
@@ -289,9 +295,10 @@ int dictAdd(dict *d, void *key, void *val)
  *
  * If key was added, the hash entry is returned to be manipulated by the caller.
  */
+//插入数据，如果key存在返回NULL并且existing指向重复的哈希节点
 dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
 {
-    long index;
+    long index; //插入数据的哈希桶编号
     dictEntry *entry;
     dictht *ht;
 
@@ -340,8 +347,8 @@ int dictReplace(dict *d, void *key, void *val)
      * you want to increment (set), and then decrement (free), and not the
      * reverse. */
     auxentry = *existing;
-    dictSetVal(d, existing, val);
-    dictFreeVal(d, &auxentry);
+    dictSetVal(d, existing, val); //新节点存入数据
+    dictFreeVal(d, &auxentry); //释放旧的节点
     return 0;
 }
 
@@ -361,7 +368,8 @@ dictEntry *dictAddOrFind(dict *d, void *key) {
 /* Search and remove an element. This is an helper function for
  * dictDelete() and dictUnlink(), please check the top comment
  * of those functions. */
-static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree) {
+/* 从哈希表中移除指定哈希节点，不一定销毁这个节点 */
+static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree /* 决定是否销毁找到的哈希节点 */) {
     uint64_t h, idx;
     dictEntry *he, *prevHe;
     int table;
@@ -494,6 +502,7 @@ dictEntry *dictFind(dict *d, const void *key)
     return NULL;
 }
 
+/* 根据key找value */
 void *dictFetchValue(dict *d, const void *key) {
     dictEntry *he;
 
@@ -562,17 +571,17 @@ dictIterator *dictGetSafeIterator(dict *d) {
 dictEntry *dictNext(dictIterator *iter)
 {
     while (1) {
-        if (iter->entry == NULL) {
+        if (iter->entry == NULL) { //entry为NULL只存在当前iterator没有指向数据（刚初始化完）或者到了当前哈希桶的底
             dictht *ht = &iter->d->ht[iter->table];
-            if (iter->index == -1 && iter->table == 0) {
+            if (iter->index == -1 && iter->table == 0) { //index=-1就是刚初始化完
                 if (iter->safe)
                     iter->d->iterators++;
                 else
                     iter->fingerprint = dictFingerprint(iter->d);
             }
-            iter->index++;
-            if (iter->index >= (long) ht->size) {
-                if (dictIsRehashing(iter->d) && iter->table == 0) {
+            iter->index++; //下一个桶
+            if (iter->index >= (long) ht->size) { //index >= size肯定是正在rehash，否则就是有问题
+                if (dictIsRehashing(iter->d) && iter->table == 0) { //正在rehash时切换到1号表
                     iter->table++;
                     iter->index = 0;
                     ht = &iter->d->ht[1];
@@ -615,7 +624,7 @@ dictEntry *dictGetRandomKey(dict *d)
 
     if (dictSize(d) == 0) return NULL;
     if (dictIsRehashing(d)) _dictRehashStep(d);
-    if (dictIsRehashing(d)) {
+    if (dictIsRehashing(d)) { //找一个非空的哈希桶
         do {
             /* We are sure there are no elements in indexes from 0
              * to rehashidx-1 */
@@ -677,7 +686,7 @@ unsigned int dictGetSomeKeys(dict *d, dictEntry **des, unsigned int count) {
     unsigned long maxsteps;
 
     if (dictSize(d) < count) count = dictSize(d);
-    maxsteps = count*10;
+    maxsteps = count*10; //因为有可能下面随机取一次会取不到哈希节点，所以要设置最大取的次数
 
     /* Try to do a rehashing work proportional to 'count'. */
     for (j = 0; j < count; j++) {
@@ -700,12 +709,12 @@ unsigned int dictGetSomeKeys(dict *d, dictEntry **des, unsigned int count) {
             /* Invariant of the dict.c rehashing: up to the indexes already
              * visited in ht[0] during the rehashing, there are no populated
              * buckets, so we can skip ht[0] for indexes between 0 and idx-1. */
-            if (tables == 2 && j == 0 && i < (unsigned long) d->rehashidx) {
+            if (tables == 2 && j == 0 && i < (unsigned long) d->rehashidx) { //如果正在rehash并且i小于0号表已经rehash的位置
                 /* Moreover, if we are currently out of range in the second
                  * table, there will be no elements in both tables up to
                  * the current rehashing index, so we jump if possible.
                  * (this happens when going from big to small table). */
-                if (i >= d->ht[1].size) i = d->rehashidx;
+                if (i >= d->ht[1].size) i = d->rehashidx; //如果i再大于1号表的size，i需要调整以便能在tables=1的时候可能取到一个哈希节点
                 continue;
             }
             if (i >= d->ht[j].size) continue; /* Out of range for this table. */
@@ -713,10 +722,10 @@ unsigned int dictGetSomeKeys(dict *d, dictEntry **des, unsigned int count) {
 
             /* Count contiguous empty buckets, and jump to other
              * locations if they reach 'count' (with a minimum of 5). */
-            if (he == NULL) {
+            if (he == NULL) { //如果取到了一个空桶
                 emptylen++;
                 if (emptylen >= 5 && emptylen > count) {
-                    i = random() & maxsizemask;
+                    i = random() & maxsizemask; //重新取i
                     emptylen = 0;
                 }
             } else {
@@ -732,13 +741,14 @@ unsigned int dictGetSomeKeys(dict *d, dictEntry **des, unsigned int count) {
                 }
             }
         }
-        i = (i+1) & maxsizemask;
+        i = (i+1) & maxsizemask; //取下一个bucket的数据
     }
     return stored;
 }
 
 /* Function to reverse bits. Algorithm from:
  * http://graphics.stanford.edu/~seander/bithacks.html#ReverseParallel */
+/* 最高位加一 */
 static unsigned long rev(unsigned long v) {
     unsigned long s = 8 * sizeof(v); // bit size; must be power of 2
     unsigned long mask = ~0;
@@ -833,10 +843,19 @@ static unsigned long rev(unsigned long v) {
  * 3) The reverse cursor is somewhat hard to understand at first, but this
  *    comment is supposed to help.
  */
+/* http://blog.csdn.net/gqtcgq/article/details/50533336 */
+/* 遍历所有哈希节点 */
+/* 哈希表扩大时，哈希值前面加一个（或多个）0，哈希值不变。
+ * 哈希表缩小时，因为哈希值是哈希函数以key为
+ * 参数计算出来的值和sizemask与运算计算出来的，
+ * sizemask肯定是2的n次方，去掉哈希值最大位和原来的哈希值与少一位（或多位）
+ * 的sizemask做与运算求出来的值是一样的，
+ * 或者这样理解，sizemask几位，哈希值就看哈希函数算出来的值低几位，
+ * 剩下的高位无论怎么样都影响不了哈希值 */
 unsigned long dictScan(dict *d,
                        unsigned long v,
-                       dictScanFunction *fn,
-                       dictScanBucketFunction* bucketfn,
+                       dictScanFunction *fn, //遍历时对于哈希节点要做的事
+                       dictScanBucketFunction* bucketfn, //遍历时对于哈希桶要做的事
                        void *privdata)
 {
     dictht *t0, *t1;
@@ -845,7 +864,7 @@ unsigned long dictScan(dict *d,
 
     if (dictSize(d) == 0) return 0;
 
-    if (!dictIsRehashing(d)) {
+    if (!dictIsRehashing(d)) { //没有在rehash，遍历0号哈希表就可以了
         t0 = &(d->ht[0]);
         m0 = t0->sizemask;
 
@@ -858,12 +877,12 @@ unsigned long dictScan(dict *d,
             de = next;
         }
 
-    } else {
+    } else { //正在rehash，需要使用上述注释算法确保所有哈希节点都被便利到
         t0 = &d->ht[0];
         t1 = &d->ht[1];
 
         /* Make sure t0 is the smaller and t1 is the bigger table */
-        if (t0->size > t1->size) {
+        if (t0->size > t1->size) { //这样可以把哈希表扩大和缩小统一看成扩大
             t0 = &d->ht[1];
             t1 = &d->ht[0];
         }
@@ -926,11 +945,12 @@ static int _dictExpandIfNeeded(dict *d)
      * table (global setting) or we should avoid it but the ratio between
      * elements/buckets is over the "safe" threshold, we resize doubling
      * the number of buckets. */
+    //默认是即使dict_can_resize关闭，已使用桶的数量是桶数量的5倍进行强制rehash。如果没有关闭则是超过桶数量就进行rehash
     if (d->ht[0].used >= d->ht[0].size &&
         (dict_can_resize ||
          d->ht[0].used/d->ht[0].size > dict_force_resize_ratio))
     {
-        return dictExpand(d, d->ht[0].used*2);
+        return dictExpand(d, d->ht[0].used*2); //扩展到已使用桶数量的两倍
     }
     return DICT_OK;
 }
@@ -955,6 +975,8 @@ static unsigned long _dictNextPower(unsigned long size)
  *
  * Note that if we are in the process of rehashing the hash table, the
  * index is always returned in the context of the second (new) hash table. */
+//如果数据可以插入（key没有重复），返回可以插入的桶编号，但不插入数据
+//existing是用来保存表中已经存在的key的哈希节点（如果存在）的地址
 static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **existing)
 {
     unsigned long idx, table;
@@ -969,13 +991,13 @@ static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **e
         /* Search if this slot does not already contain the given key */
         he = d->ht[table].table[idx];
         while(he) {
-            if (key==he->key || dictCompareKeys(d, key, he->key)) {
-                if (existing) *existing = he;
+            if (key==he->key || dictCompareKeys(d, key, he->key)) { //比较是否key已经存在了
+                if (existing) *existing = he; //存在就把桶中一样的数据给existing
                 return -1;
             }
             he = he->next;
         }
-        if (!dictIsRehashing(d)) break;
+        if (!dictIsRehashing(d)) break; //如果正在rehash则要找一找1号表
     }
     return idx;
 }

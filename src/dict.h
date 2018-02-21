@@ -44,17 +44,20 @@
 /* Unused arguments generate annoying warnings... */
 #define DICT_NOTUSED(V) ((void) V)
 
+//哈希节点
 typedef struct dictEntry {
     void *key;
+    /* 数据值 */
     union {
-        void *val;
-        uint64_t u64;
-        int64_t s64;
-        double d;
+        void *val; //指针大小是8个字节
+        uint64_t u64; //uint64_t是8个字节大小
+        int64_t s64; //8个字节
+        double d; //8个字节
     } v;
-    struct dictEntry *next;
+    struct dictEntry *next; //可以构建哈希链表
 } dictEntry;
 
+//字典的操作结构体
 typedef struct dictType {
     uint64_t (*hashFunction)(const void *key);
     void *(*keyDup)(void *privdata, const void *key);
@@ -66,17 +69,19 @@ typedef struct dictType {
 
 /* This is our hash table structure. Every dictionary has two of this as we
  * implement incremental rehashing, for the old to the new table. */
+//哈希表
 typedef struct dictht {
-    dictEntry **table;
-    unsigned long size;
-    unsigned long sizemask;
-    unsigned long used;
+    dictEntry **table; //指向表的第一个哈希桶
+    /* 哈希表的情况 */
+    unsigned long size; //表可存放桶的数量
+    unsigned long sizemask; //掩码用于hashFunction(key)结果如果超过size，则将结果与sizemask做一个&运算，这样将哈希结果框定到size内
+    unsigned long used; //节点的数量
 } dictht;
 
 typedef struct dict {
     dictType *type;
     void *privdata;
-    dictht ht[2];
+    dictht ht[2]; //哈希表，一般情况下用0号，rehash之后同时使用0号和1号
     long rehashidx; /* rehashing not in progress if rehashidx == -1 */
     unsigned long iterators; /* number of iterators currently running */
 } dict;
@@ -87,7 +92,7 @@ typedef struct dict {
  * should be called while iterating. */
 typedef struct dictIterator {
     dict *d;
-    long index;
+    long index; //哈希桶号
     int table, safe;
     dictEntry *entry, *nextEntry;
     /* unsafe iterator fingerprint for misuse detection. */
@@ -101,10 +106,12 @@ typedef void (dictScanBucketFunction)(void *privdata, dictEntry **bucketref);
 #define DICT_HT_INITIAL_SIZE     4
 
 /* ------------------------------- Macros ------------------------------------*/
+/* 利用dictType中的函数指针对dict操作方法进行宏封装 */
 #define dictFreeVal(d, entry) \
     if ((d)->type->valDestructor) \
         (d)->type->valDestructor((d)->privdata, (entry)->v.val)
 
+/* while(0)表明只执行一次，但是为了格式美观所以用上了do while(0) */
 #define dictSetVal(d, entry, _val_) do { \
     if ((d)->type->valDup) \
         (entry)->v.val = (d)->type->valDup((d)->privdata, _val_); \
@@ -132,6 +139,7 @@ typedef void (dictScanBucketFunction)(void *privdata, dictEntry **bucketref);
         (entry)->key = (_key_); \
 } while(0)
 
+/* 对于哈希节点中的key的比较，优先使用用户定义的keyCompare，否则就是进行key的简单对比（C标准类型或用户重载过==的类型） */
 #define dictCompareKeys(d, key1, key2) \
     (((d)->type->keyCompare) ? \
         (d)->type->keyCompare((d)->privdata, key1, key2) : \
