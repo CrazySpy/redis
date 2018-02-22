@@ -43,7 +43,7 @@
 
 
 #include <stdint.h>
-
+/* 按字节倒转 */
 /* Toggle the 16 bit unsigned integer pointed by *p from little endian to
  * big endian */
 void memrev16(void *p) {

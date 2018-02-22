@@ -45,6 +45,7 @@ uint64_t intrev64(uint64_t v);
 
 /* variants of the function doing the actual convertion only if the target
  * host is big endian */
+/* 用来解决大端和小端的数据问题，小端存储数据 */
 #if (BYTE_ORDER == LITTLE_ENDIAN)
 #define memrev16ifbe(p)
 #define memrev32ifbe(p)
