@@ -32,10 +32,11 @@
 #define __INTSET_H
 #include <stdint.h>
 
+/* 不论实际模式是什么，数据存储一律按照小端模式 */
 typedef struct intset {
     uint32_t encoding;
     uint32_t length;
-    int8_t contents[];
+    int8_t contents[]; //一个字节一个地址，这样可以方便做大小端的转换处理
 } intset;
 
 intset *intsetNew(void);
